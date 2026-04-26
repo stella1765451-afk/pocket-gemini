@@ -504,14 +504,27 @@ if prompt or is_regenerate:
         )
 
     # 3) 构造 contents（结合数据库历史 + 内存中的 parts）
+    from google.genai import types as _gt
     contents = []
     cur_messages = db.get_messages(conv_id)
     for m in cur_messages:
         role = "user" if m["role"] == "user" else "model"
         # 当前轮的 user 用 in_memory_parts，老消息只用文本
         in_mem = st.session_state.get("in_memory_parts", {}).get(m["id"])
-        parts = in_mem if in_mem else [m["content"]]
-        contents.append({"role": role, "parts": parts})
+        raw_parts = in_mem if in_mem else [m["content"]]
+        # 把所有字符串包装成 Part.from_text，对象（Part / 上传文件）保持原样
+        normalized_parts = []
+        for p in raw_parts:
+            if isinstance(p, str):
+                if p.strip():
+                    normalized_parts.append(_gt.Part.from_text(text=p))
+            else:
+                normalized_parts.append(p)
+        if not normalized_parts:
+            continue
+        contents.append(
+            _gt.Content(role=role, parts=normalized_parts)
+        )
 
     # 4) 调用 Gemini，流式输出
     with st.chat_message("assistant"):
