@@ -449,12 +449,14 @@ if is_regenerate:
     prompt = None  # 不要新消息，直接用历史
 
 # 防重入：用指纹判断这次 prompt 是否已经处理过
-# 指纹 = (conv_id, prompt 内容, 当前消息总数)
+# 指纹包含：对话 ID + prompt 内容 + 当前消息数 + 助手消息数
 def _make_fingerprint(p: str | None, regen: bool) -> str:
     cid = st.session_state.current_conv_id or 0
+    n_total = len(messages)
+    n_assistant = sum(1 for m in messages if m["role"] == "assistant")
     if regen:
-        return f"regen:{cid}:{len(messages)}"
-    return f"send:{cid}:{p}:{len(messages)}"
+        return f"regen:{cid}:{n_total}:{n_assistant}"
+    return f"send:{cid}:{p}:{n_total}:{n_assistant}"
 
 current_fp = _make_fingerprint(prompt, is_regenerate) if (prompt or is_regenerate) else None
 last_fp = st.session_state.get("last_processed_fp")
@@ -465,6 +467,7 @@ last_fp = st.session_state.get("last_processed_fp")
 should_process = (prompt or is_regenerate) and current_fp != last_fp
 
 if should_process:
+    # 立即标记为已处理，防止 rerun 内的二次进入
     st.session_state.last_processed_fp = current_fp
     # 1) 确保有当前对话
     conv_id = ensure_current_conv(model_id=model_id, system_prompt=system_prompt)
@@ -494,10 +497,19 @@ if should_process:
             "fetched_urls": fetched_urls,
             # images 用 bytes 存数据库占空间大，只在 UI session 中保留
         }
-        # 注意：图片 bytes 不入库，因为可能很大；文件名入库即可
-        user_msg_id = db.add_message(
-            conv_id, "user", prompt, meta=user_meta
+        # 防御性查重：如果数据库最后一条用户消息和当前完全一样，说明已经写过了
+        existing_msgs = db.get_messages(conv_id)
+        is_duplicate_user = (
+            existing_msgs
+            and existing_msgs[-1]["role"] == "user"
+            and existing_msgs[-1]["content"] == prompt
         )
+        if is_duplicate_user:
+            user_msg_id = existing_msgs[-1]["id"]
+        else:
+            user_msg_id = db.add_message(
+                conv_id, "user", prompt, meta=user_meta
+            )
 
         # 立即渲染用户消息（带原始图片预览）
         with st.chat_message("user"):
@@ -577,7 +589,15 @@ if should_process:
             "cost": cost,
         }
 
-    db.add_message(conv_id, "assistant", full_response, meta=assistant_meta)
+    # 防御性查重：如果数据库最后一条助手消息和当前完全一样，跳过
+    existing_msgs2 = db.get_messages(conv_id)
+    is_duplicate_assistant = (
+        existing_msgs2
+        and existing_msgs2[-1]["role"] == "assistant"
+        and existing_msgs2[-1]["content"] == full_response
+    )
+    if not is_duplicate_assistant:
+        db.add_message(conv_id, "assistant", full_response, meta=assistant_meta)
 
     # 6) 第一次对话后自动命名
     if current_conv is None or current_conv.get("title") == "新对话":
@@ -589,5 +609,8 @@ if should_process:
             new_title = auto_title_for(first_user_msg, model_id)
             if new_title:
                 db.rename_conversation(conv_id, new_title)
-        # 只有改了标题才需要 rerun（更新左边栏列表）
-        st.rerun()
+
+    # 7) 强制 rerun 一次：让页面统一从数据库读出消息渲染，
+    # 消除流式 placeholder 残留导致的"双显"。
+    # 配合 fingerprint 机制，rerun 后不会重复处理这条消息。
+    st.rerun()
