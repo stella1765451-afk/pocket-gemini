@@ -1,0 +1,11 @@
+[server]
+maxUploadSize = 500
+
+[theme]
+base = "light"
+primaryColor = "#4285F4"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F5F7FA"
+
+[browser]
+gatherUsageStats = false
