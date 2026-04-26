@@ -448,10 +448,24 @@ if is_regenerate:
     st.session_state.pending_input = None
     prompt = None  # 不要新消息，直接用历史
 
+# 防重入：用指纹判断这次 prompt 是否已经处理过
+# 指纹 = (conv_id, prompt 内容, 当前消息总数)
+def _make_fingerprint(p: str | None, regen: bool) -> str:
+    cid = st.session_state.current_conv_id or 0
+    if regen:
+        return f"regen:{cid}:{len(messages)}"
+    return f"send:{cid}:{p}:{len(messages)}"
+
+current_fp = _make_fingerprint(prompt, is_regenerate) if (prompt or is_regenerate) else None
+last_fp = st.session_state.get("last_processed_fp")
+
 # ============================================================
 # 处理发送
 # ============================================================
-if prompt or is_regenerate:
+should_process = (prompt or is_regenerate) and current_fp != last_fp
+
+if should_process:
+    st.session_state.last_processed_fp = current_fp
     # 1) 确保有当前对话
     conv_id = ensure_current_conv(model_id=model_id, system_prompt=system_prompt)
     # 同步对话的模型和 system prompt 设置
@@ -575,5 +589,5 @@ if prompt or is_regenerate:
             new_title = auto_title_for(first_user_msg, model_id)
             if new_title:
                 db.rename_conversation(conv_id, new_title)
-
-    st.rerun()
+        # 只有改了标题才需要 rerun（更新左边栏列表）
+        st.rerun()
