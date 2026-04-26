@@ -545,10 +545,10 @@ if prompt or is_regenerate:
             if is_final and u:
                 usage = u
 
-        # 流结束后，用增强 markdown 替换最后渲染
-        placeholder.empty()
-        with placeholder.container():
-            render_enhanced_markdown(full_response)
+        # 流结束后用最终内容刷新（去掉光标 ▌）
+        # 注意：不在这里做 enhanced 渲染，避免与 rerun 后的渲染重复。
+        # rerun 后会从数据库读出消息并用 enhanced markdown 渲染。
+        placeholder.markdown(full_response)
 
     # 5) 写入助手消息
     assistant_meta = {}
