@@ -216,9 +216,16 @@ def quick_generate(
     if system_prompt:
         config_kwargs["system_instruction"] = system_prompt
     try:
+        # 新版 SDK 要求 contents 是 Content 对象列表
+        contents = [
+            types.Content(
+                role="user",
+                parts=[types.Part.from_text(text=prompt)],
+            )
+        ]
         resp = client.models.generate_content(
             model=model_id,
-            contents=prompt,
+            contents=contents,
             config=types.GenerateContentConfig(**config_kwargs),
         )
         return (resp.text or "").strip()
