@@ -48,11 +48,7 @@ def render_enhanced_markdown(text: str):
             render_mermaid(mermaid_code)
         last_end = match.end()
 
-    # 剩余部分
+    # 剩余部分（如果没有 mermaid 块，rest 就是整个 text）
     rest = text[last_end:]
     if rest.strip():
         st.markdown(rest)
-
-    # 如果根本没有 mermaid 块，且 last_end==0，上面循环没执行
-    if last_end == 0 and not MERMAID_BLOCK_RE.search(text):
-        st.markdown(text)
